@@ -798,9 +798,18 @@ def _do_ensure(
               file=sys.stderr)
         env = dict(os.environ)
         env['PIP_CONFIG_SETTINGS'] = "editable_mode=compat"
+        # nano-ros patch: drop the `-e` editable flag. Editable install
+        # requires PEP 660's build_editable hook, missing from
+        # setuptools < 64. Ubuntu 22.04 ships setuptools 58.2.0;
+        # ensurepip in Python 3.10 installs the same version into the
+        # pyvenv; --no-build-isolation forces pip to use that old
+        # setuptools regardless of pyproject.toml's [build-system]
+        # requires. Non-editable install side-steps PEP 660 entirely
+        # (uses build_wheel which exists since setuptools 40+); the
+        # qemu/python package is a build-time helper, not a dev target
+        # users iterate on inside this pyvenv.
         pip_install(
-            args=["--no-build-isolation",
-                  "-e"] + local_packages,
+            args=["--no-build-isolation"] + local_packages,
             online=online,
             wheels_dir=wheels_dir,
             env=env,
