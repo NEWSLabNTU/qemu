@@ -495,6 +495,20 @@ static int lan9118_filter(lan9118_state *s, const uint8_t *addr)
     }
 }
 
+static bool lan9118_can_receive(NetClientState *nc)
+{
+    lan9118_state *s = qemu_get_nic_opaque(nc);
+
+    if ((s->mac_cr & MAC_CR_RXEN) == 0) {
+        return false;
+    }
+    if (s->rx_status_fifo_used == s->rx_status_fifo_size) {
+        return false;
+    }
+    /* Leave a frame's worth of headroom in the data FIFO. */
+    return s->rx_fifo_size - s->rx_fifo_used >= 384;
+}
+
 static ssize_t lan9118_receive(NetClientState *nc, const uint8_t *buf,
                                size_t size)
 {
@@ -684,6 +698,10 @@ static uint32_t rx_status_fifo_pop(lan9118_state *s)
         if (s->rx_status_fifo_head >= s->rx_status_fifo_size) {
             s->rx_status_fifo_head -= s->rx_status_fifo_size;
         }
+        /* RX FIFO just freed up — tell the net queue layer to
+         * retry any packets it had to defer because we previously
+         * returned `false` from `can_receive`. */
+        qemu_flush_queued_packets(qemu_get_queue(s->nic));
         /* ??? What value should be returned when the FIFO is empty?  */
         DPRINTF("RX status pop 0x%08x\n", val);
     }
@@ -1262,6 +1280,7 @@ static const MemoryRegionOps lan9118_16bit_mem_ops = {
 static NetClientInfo net_lan9118_info = {
     .type = NET_CLIENT_DRIVER_NIC,
     .size = sizeof(NICState),
+    .can_receive = lan9118_can_receive,
     .receive = lan9118_receive,
     .link_status_changed = lan9118_set_link,
 };
