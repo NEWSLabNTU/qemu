@@ -1,0 +1,11 @@
+[build-system]
+# nano-ros patch — QEMU v11.0.0 ships qemu/python with setup.cfg +
+# setup.py only, defaulting to setuptools.build_meta:__legacy__ which
+# lacks PEP 660's build_editable hook. mkvenv.py invokes
+# `pip install -e qemu/python` and fails on systems where the
+# resolved setuptools is old (Ubuntu 22.04 / Python 3.10 ships
+# setuptools 58.2.0). Declaring the modern build backend explicitly
+# forces pip to use setuptools.build_meta (PEP 660-compliant when
+# setuptools >= 64).
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
