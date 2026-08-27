@@ -822,6 +822,17 @@ static void do_mac_write(lan9118_state *s, int reg, uint32_t val)
         if ((s->mac_cr & MAC_CR_RXEN) != 0 && (val & MAC_CR_RXEN) == 0) {
             s->int_sts |= RXSTOP_INT;
         }
+        if ((s->mac_cr & MAC_CR_RXEN) == 0 && (val & MAC_CR_RXEN) != 0) {
+            /* RX has just been enabled. `can_receive` answered `false` for
+             * every frame that arrived before this point, and a backend that
+             * saw that answer has stopped polling its fd — a tap peered
+             * directly, or through a hub with no other willing port, will
+             * never read again on its own. Nothing else can restart it: the
+             * flush in `rx_status_fifo_pop` needs a frame to have been
+             * received first, which is exactly what cannot happen. Flush here
+             * so enabling RX re-arms the backend. */
+            qemu_flush_queued_packets(qemu_get_queue(s->nic));
+        }
         s->mac_cr = val & ~MAC_CR_RESERVED;
         DPRINTF("MAC_CR: %08x\n", val);
         break;
