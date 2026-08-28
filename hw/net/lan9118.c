@@ -530,9 +530,13 @@ static ssize_t lan9118_receive(NetClientState *nc, const uint8_t *buf,
         return -1;
     }
 
-    /* TODO: Implement FIFO overflow notification.  */
+    /* Return 0, NOT -1: the queue layer treats 0 as "cannot take it now,
+     * requeue and retry" and ANY OTHER value -- negative included -- as
+     * delivered-or-dropped, freeing the packet (net/queue.c). A full fifo is
+     * back-pressure, not an error, and saying -1 here silently discards every
+     * queued frame past the fifo's capacity. */
     if (s->rx_status_fifo_used == s->rx_status_fifo_size) {
-        return -1;
+        return 0;
     }
 
     filter = lan9118_filter(s, buf);
@@ -546,7 +550,7 @@ static ssize_t lan9118_receive(NetClientState *nc, const uint8_t *buf,
     /* Add a word for the CRC.  */
     fifo_len++;
     if (s->rx_fifo_size - s->rx_fifo_used < fifo_len) {
-        return -1;
+        return 0;   /* back-pressure, not an error -- see above */
     }
 
     DPRINTF("Got packet len:%d fifo:%d filter:%s\n",
@@ -603,6 +607,13 @@ static uint32_t rx_fifo_pop(lan9118_state *s)
 {
     int n;
     uint32_t val;
+    bool was_full;
+
+    /* Popping DATA here is what frees the space `can_receive` gates on. The
+     * flush in `rx_status_fifo_pop` runs one step earlier, while this frame's
+     * data is still resident, so it sees no room and delivers nothing; without
+     * a flush here the backend is not re-armed at the moment room appears. */
+    was_full = !lan9118_can_receive(qemu_get_queue(s->nic));
 
     if (s->rxp_size == 0 && s->rxp_pad == 0) {
         s->rxp_size = s->rx_packet_size[s->rx_packet_size_head];
@@ -646,6 +657,9 @@ static uint32_t rx_fifo_pop(lan9118_state *s)
         val =  0;
     }
     lan9118_update(s);
+    if (was_full && lan9118_can_receive(qemu_get_queue(s->nic))) {
+        qemu_flush_queued_packets(qemu_get_queue(s->nic));
+    }
     return val;
 }
 
